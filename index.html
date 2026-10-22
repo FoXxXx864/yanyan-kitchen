@@ -329,6 +329,7 @@ select.minput{appearance:none}
 <script>
 'use strict';
 const LS_KEY = 'cute_kitchen_v1';
+const MENU_VERSION = '2';
 
 /* ================= 云端同步配置 ================= */
 var CLOUD = {
@@ -1019,6 +1020,16 @@ function renderCloudOrders() {
 }
 
 /* ================= 初始化 ================= */
+(function checkMenuVersion() {
+  var stored = localStorage.getItem('kitchen_menu_version');
+  if (stored !== MENU_VERSION) {
+    var fresh = seed();
+    state.cats = fresh.cats;
+    state.dishes = fresh.dishes;
+    localStorage.setItem('kitchen_menu_version', MENU_VERSION);
+    save();
+  }
+})();
 buildEmojiGrid();
 renderHeader();
 $('searchInput').addEventListener('input', function (e) { searchText = e.target.value; renderHome(); });
