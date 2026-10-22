@@ -329,7 +329,7 @@ select.minput{appearance:none}
 <script>
 'use strict';
 const LS_KEY = 'cute_kitchen_v1';
-const MENU_VERSION = '2';
+const MENU_VERSION = '3';
 
 /* ================= 云端同步配置 ================= */
 var CLOUD = {
@@ -351,7 +351,7 @@ function seed() {
     kitchen: {
       name: '宝宝的专属厨房',
       avatar: '🍳',
-      notice: '本厨房只为王雪纯姐姐一人开放，有需要请点单哦～'
+      notice: '本厨房只为艳艳小兔子一人开放，有需要请点单哦～'
     },
     cats: [
       { id: 'c1', name: '有情绪厨房', emoji: '😋' },
@@ -1024,6 +1024,7 @@ function renderCloudOrders() {
   var stored = localStorage.getItem('kitchen_menu_version');
   if (stored !== MENU_VERSION) {
     var fresh = seed();
+    state.kitchen = fresh.kitchen;
     state.cats = fresh.cats;
     state.dishes = fresh.dishes;
     localStorage.setItem('kitchen_menu_version', MENU_VERSION);
