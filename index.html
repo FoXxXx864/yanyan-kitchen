@@ -299,6 +299,11 @@ select.minput{appearance:none}
     <div class="success-box" id="successBox" onclick="event.stopPropagation()"></div>
   </div>
 
+  <!-- 新订单提醒 -->
+  <div class="overlay center" id="newOrderOverlay" onclick="closeNewOrder()">
+    <div class="success-box" id="newOrderBox" onclick="event.stopPropagation()"></div>
+  </div>
+
   <!-- 餐品表单 -->
   <div class="overlay center" id="dishModal">
     <div class="modal" onclick="event.stopPropagation()">
@@ -324,6 +329,20 @@ select.minput{appearance:none}
 <script>
 'use strict';
 const LS_KEY = 'cute_kitchen_v1';
+
+/* ================= 云端同步配置 ================= */
+var CLOUD = {
+  api: 'https://yanyan-api.pages.dev',
+  sctKey: 'SCT447547TVXYa8IwJXmozZkssQIbaS7Pf',
+  deviceId: (function () {
+    var k = 'kitchen_device_id';
+    var d = localStorage.getItem(k);
+    if (!d) { d = 'dev' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); localStorage.setItem(k, d); }
+    return d;
+  })()
+};
+var cloudOthers = [];
+var lastCloudId = 0;
 
 /* ================= 数据 ================= */
 function seed() {
@@ -606,6 +625,7 @@ function submitOrder() {
   renderHome();
   renderCartBar();
   showSuccess(order);
+  syncOrderToCloud(order);
 }
 
 function showSuccess(o) {
@@ -640,21 +660,24 @@ function orderAgain(pairs) {
 }
 
 function renderOrders() {
+  var html = '<div id="cloudOrdersBox"></div>';
   if (!state.orders.length) {
-    $('ordersBox').innerHTML = '<div class="empty"><span class="big">🧾</span>还没有订单，去点一单吧～</div>';
-    return;
+    html += '<div class="empty"><span class="big">🧾</span>还没有订单，去点一单吧～</div>';
+  } else {
+    html += state.orders.map(function (o) {
+      return '<div class="order-card">'
+        + '<div class="order-head"><span class="order-no">' + esc(o.no) + '</span><span>' + esc(o.time) + '</span><span class="badge done">✓ 已下单</span></div>'
+        + '<div class="order-items">' + o.items.map(function (it) {
+          return '<div class="order-line"><span>' + esc(it.emoji) + ' ' + esc(it.name) + ' ×' + it.qty + '</span><span>¥' + (it.price * it.qty).toFixed(2) + '</span></div>';
+        }).join('') + '</div>'
+        + (o.note ? '<div class="order-note">📝 ' + esc(o.note) + '</div>' : '')
+        + '<div class="order-foot"><span>合计 <b>¥' + o.total.toFixed(2) + '</b></span>'
+        + '<button class="again" onclick="orderAgain(' + esc(JSON.stringify(o.items.map(function (it) { return [it.id, it.qty]; }))) + ')">再来一单</button></div>'
+        + '</div>';
+    }).join('');
   }
-  $('ordersBox').innerHTML = state.orders.map(function (o) {
-    return '<div class="order-card">'
-      + '<div class="order-head"><span class="order-no">' + esc(o.no) + '</span><span>' + esc(o.time) + '</span><span class="badge done">✓ 已下单</span></div>'
-      + '<div class="order-items">' + o.items.map(function (it) {
-        return '<div class="order-line"><span>' + esc(it.emoji) + ' ' + esc(it.name) + ' ×' + it.qty + '</span><span>¥' + (it.price * it.qty).toFixed(2) + '</span></div>';
-      }).join('') + '</div>'
-      + (o.note ? '<div class="order-note">📝 ' + esc(o.note) + '</div>' : '')
-      + '<div class="order-foot"><span>合计 <b>¥' + o.total.toFixed(2) + '</b></span>'
-      + '<button class="again" onclick="orderAgain(' + esc(JSON.stringify(o.items.map(function (it) { return [it.id, it.qty]; }))) + ')">再来一单</button></div>'
-      + '</div>';
-  }).join('');
+  $('ordersBox').innerHTML = html;
+  renderCloudOrders();
 }
 
 /* ================= 随机页 ================= */
@@ -894,11 +917,117 @@ function resetAll() {
   toast('已重置 🔄');
 }
 
+/* ================= 云端同步 ================= */
+function syncOrderToCloud(order) {
+  var items = order.items.map(function (it) { return { emoji: it.emoji, name: it.name, qty: it.qty, price: it.price }; });
+  if (CLOUD.api) {
+    fetch(CLOUD.api + '/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device: CLOUD.deviceId, items: items, total: order.total, note: order.note, time: order.time })
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      if (j && j.ok) { toast('订单已同步 ✅'); } else { toast('已保存在本机（云端暂不可用）'); }
+    }).catch(function () { toast('已保存在本机（云端暂不可用）'); });
+  }
+  if (CLOUD.sctKey) {
+    var title = '🍳 新订单：' + items.map(function (it) { return it.name; }).join('、').slice(0, 60);
+    var desp = items.map(function (it) { return it.emoji + ' ' + it.name + ' ×' + it.qty + '　¥' + (it.price * it.qty).toFixed(2); }).join('\n');
+    desp += '\n\n合计：¥' + order.total.toFixed(2);
+    if (order.note) desp += '\n备注：' + order.note;
+    desp += '\n时间：' + order.time;
+    try {
+      fetch('https://sctapi.ftqq.com/' + CLOUD.sctKey + '.send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ title: title, desp: desp }).toString()
+      }).catch(function () {});
+    } catch (e) {}
+  }
+}
+
+function beep() {
+  try {
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    var o = ctx.createOscillator();
+    var g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'sine'; g.gain.value = 0.12;
+    o.frequency.value = 880; o.start();
+    setTimeout(function () { o.frequency.value = 1318; }, 200);
+    setTimeout(function () { o.stop(); ctx.close(); }, 450);
+  } catch (e) {}
+}
+
+function showNewOrder(o) {
+  var items = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
+  var lines = items.map(function (it) {
+    return '<div class="rl"><span>' + esc(it.emoji) + ' ' + esc(it.name) + ' ×' + it.qty + '</span><span>¥' + (it.price * it.qty).toFixed(2) + '</span></div>';
+  }).join('');
+  $('newOrderBox').innerHTML =
+    '<div class="sb-big">🔔</div>'
+    + '<div class="sb-title">新订单来啦！</div>'
+    + '<div class="sb-sub">' + esc(o.time || '') + '</div>'
+    + '<div class="receipt">'
+    + '<div class="rhead">' + esc(state.kitchen.name) + '</div>'
+    + lines
+    + '<div class="rdash"></div>'
+    + '<div class="rl"><b>合计</b><b>¥' + Number(o.total || 0).toFixed(2) + '</b></div>'
+    + (o.note ? '<div class="rl"><span>📝 备注</span><span>' + esc(o.note) + '</span></div>' : '')
+    + '</div>'
+    + '<button class="big-btn slim" onclick="closeNewOrder()">知道啦 💖</button>';
+  $('newOrderOverlay').classList.add('show');
+  beep();
+  try { if (window.Notification && Notification.permission === 'default') Notification.requestPermission(); } catch (e) {}
+  try { if (window.Notification && Notification.permission === 'granted') { new Notification('专属厨房', { body: '新订单来啦！合计 ¥' + Number(o.total || 0).toFixed(2) }); } } catch (e) {}
+}
+function closeNewOrder() { $('newOrderOverlay').classList.remove('show'); }
+
+function pollCloud() {
+  if (!CLOUD.api) return;
+  fetch(CLOUD.api + '/api/orders').then(function (r) { return r.json(); }).then(function (j) {
+    if (!j || !j.ok || !Array.isArray(j.orders)) return;
+    cloudOthers = j.orders.filter(function (o) { return o.device_id !== CLOUD.deviceId; });
+    var maxId = 0;
+    j.orders.forEach(function (o) { if (o.id > maxId) maxId = o.id; });
+    if (lastCloudId > 0 && maxId > lastCloudId) {
+      var newest = null;
+      j.orders.forEach(function (o) { if (o.id === maxId) newest = o; });
+      if (newest && newest.device_id !== CLOUD.deviceId) showNewOrder(newest);
+    }
+    lastCloudId = maxId;
+    renderCloudOrders();
+  }).catch(function () {});
+}
+
+function renderCloudOrders() {
+  var box = $('cloudOrdersBox');
+  if (!box) return;
+  if (!cloudOthers.length) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = '<div class="cat-head">☁️ 云端订单（TA 的）</div>' + cloudOthers.map(function (o) {
+    var items = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
+    return '<div class="order-card">'
+      + '<div class="order-head"><span>#' + o.id + '</span><span>' + esc(o.time || '') + '</span><span class="badge done">✓ 已下单</span></div>'
+      + '<div class="order-items">' + items.map(function (it) {
+        return '<div class="order-line"><span>' + esc(it.emoji) + ' ' + esc(it.name) + ' ×' + it.qty + '</span><span>¥' + (it.price * it.qty).toFixed(2) + '</span></div>';
+      }).join('') + '</div>'
+      + (o.note ? '<div class="order-note">📝 ' + esc(o.note) + '</div>' : '')
+      + '<div class="order-foot"><span>合计 <b>¥' + Number(o.total || 0).toFixed(2) + '</b></span></div>'
+      + '</div>';
+  }).join('');
+  var em = box.parentElement.querySelector('.empty');
+  if (em) em.style.display = cloudOthers.length ? 'none' : '';
+}
+
 /* ================= 初始化 ================= */
 buildEmojiGrid();
 renderHeader();
 $('searchInput').addEventListener('input', function (e) { searchText = e.target.value; renderHome(); });
 showPage('home');
+pollCloud();
+setInterval(pollCloud, 30000);
 </script>
 </body>
 </html>
